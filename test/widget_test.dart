@@ -19,7 +19,7 @@ void main() {
     expect(find.byType(MaterialApp), findsOneWidget);
     expect(find.byType(Scaffold), findsOneWidget);
     expect(find.byType(SafeArea), findsNWidgets(2));
-    expect(find.text('Money 个人资产管理'), findsOneWidget);
+    expect(find.text('Money'), findsOneWidget);
     expect(find.text('正在打开本机资产数据...'), findsOneWidget);
     expect(platform.controllers, hasLength(1));
     expect(

@@ -15,7 +15,7 @@ class GrzcglApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Money-个人资产管理',
+      title: 'Money',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(scaffoldBackgroundColor: _appBackgroundColor),
       home: const AssetManagerShell(),
@@ -128,7 +128,7 @@ class _StartupShell extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  'Money 个人资产管理',
+                  'Money',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: Color(0xFF24190F),
