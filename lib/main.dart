@@ -1,152 +1,189 @@
-import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
-import 'package:webview_flutter/webview_flutter.dart';
-import 'package:webview_flutter_android/webview_flutter_android.dart';
 
-const _appBackgroundColor = Color(0xFFF4EAD8);
+import 'app/native_asset_app_shell.dart';
+import 'app/theme/app_theme.dart';
+import 'data/local/app_database.dart';
+import 'data/repositories/asset_store_service.dart';
+import 'domain/repositories/asset_state_repository.dart';
+import 'features/settings/asset_notification_service.dart';
 
 void main() {
-  runApp(const GrzcglApp());
+  debugPrint('GRZCGL app main');
+  final database = AppDatabase();
+  runApp(GrzcglApp(repository: AssetStoreService(database)));
 }
 
-class GrzcglApp extends StatelessWidget {
-  const GrzcglApp({super.key});
+class GrzcglApp extends StatefulWidget {
+  const GrzcglApp({
+    super.key,
+    required this.repository,
+    this.notificationService,
+  });
+
+  final AssetStateRepository repository;
+  final AssetNotificationService? notificationService;
 
   @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Money',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(scaffoldBackgroundColor: _appBackgroundColor),
-      home: const AssetManagerShell(),
-    );
-  }
+  State<GrzcglApp> createState() => _GrzcglAppState();
 }
 
-class AssetManagerShell extends StatefulWidget {
-  const AssetManagerShell({super.key});
-
-  @override
-  State<AssetManagerShell> createState() => _AssetManagerShellState();
-}
-
-class _AssetManagerShellState extends State<AssetManagerShell> {
-  late final WebViewController _controller;
-  var _pageReady = false;
+class _GrzcglAppState extends State<GrzcglApp> {
+  late final AppThemeController _themeController;
+  late final AssetNotificationService _notificationService;
+  late Future<void> _themeFuture;
 
   @override
   void initState() {
     super.initState();
-
-    _controller = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setBackgroundColor(const Color(0xFFF4EAD8))
-      ..setNavigationDelegate(
-        NavigationDelegate(
-          onPageFinished: (_) {
-            if (mounted) {
-              setState(() => _pageReady = true);
-            }
-          },
-          onNavigationRequest: (request) =>
-              _isAllowedLocalNavigation(request.url)
-              ? NavigationDecision.navigate
-              : NavigationDecision.prevent,
-        ),
-      );
-
-    final platformController = _controller.platform;
-    if (platformController is AndroidWebViewController) {
-      platformController.setOnShowFileSelector(_pickImageFile);
-    }
-
-    _controller.loadFlutterAsset('assets/web/index.html');
+    _themeController = AppThemeController(widget.repository);
+    _notificationService =
+        widget.notificationService ?? FlutterAssetNotificationService();
+    _themeFuture = _themeController.load();
   }
 
-  bool _isAllowedLocalNavigation(String url) {
-    if (url == 'about:blank') return true;
-
-    final uri = Uri.tryParse(url);
-    if (uri == null) return false;
-    if (uri.scheme == 'file') {
-      return uri.path.startsWith('/android_asset/flutter_assets/assets/web/');
-    }
-    return uri.scheme == 'https' &&
-        uri.host == 'appassets.androidplatform.net' &&
-        uri.path.startsWith('/assets/web/');
+  @override
+  void dispose() {
+    _themeController.dispose();
+    super.dispose();
   }
 
-  Future<List<String>> _pickImageFile(FileSelectorParams params) async {
-    final acceptedTypes = params.acceptTypes
-        .expand((type) => type.split(','))
-        .map((type) => type.trim())
-        .where((type) => type.isNotEmpty && type != '*/*');
-    final mimeTypes = acceptedTypes.any((type) => type.contains('/'))
-        ? acceptedTypes.where((type) => type.contains('/')).toList()
-        : <String>['image/*'];
-    final typeGroups = <XTypeGroup>[
-      XTypeGroup(label: '图片', mimeTypes: mimeTypes),
-    ];
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _themeController,
+      builder: (context, _) {
+        return AppThemeScope(
+          controller: _themeController,
+          child: MaterialApp(
+            title: 'Money',
+            debugShowCheckedModeBanner: false,
+            theme: _themeController.tokens.toThemeData(),
+            home: FutureBuilder<void>(
+              future: _themeFuture,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState != ConnectionState.done) {
+                  return const _AppStartupScreen();
+                }
+                if (snapshot.hasError) {
+                  debugPrint('GRZCGL theme load failed: ${snapshot.error}');
+                  return _AppStartupError(
+                    onRetry: () {
+                      setState(() {
+                        _themeFuture = _themeController.load();
+                      });
+                    },
+                  );
+                }
+                return NativeAssetAppShell(
+                  repository: widget.repository,
+                  themeController: _themeController,
+                  notificationService: _notificationService,
+                );
+              },
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
 
-    if (params.mode == FileSelectorMode.openMultiple) {
-      final files = await openFiles(acceptedTypeGroups: typeGroups);
-      return files.map((file) => Uri.file(file.path).toString()).toList();
-    }
+class _AppStartupScreen extends StatefulWidget {
+  const _AppStartupScreen();
 
-    final file = await openFile(acceptedTypeGroups: typeGroups);
-    return file == null ? <String>[] : <String>[Uri.file(file.path).toString()];
+  @override
+  State<_AppStartupScreen> createState() => _AppStartupScreenState();
+}
+
+class _AppStartupScreenState extends State<_AppStartupScreen>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<double> _fade;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 260),
+    )..forward();
+    _fade = CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: _appBackgroundColor,
-      resizeToAvoidBottomInset: false,
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          SafeArea(child: WebViewWidget(controller: _controller)),
-          if (!_pageReady) const _StartupShell(),
-        ],
+      key: const Key('app-splash-screen'),
+      backgroundColor: const Color(0xFF15120D),
+      body: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Color(0xFF15120D), Color(0xFF12110F), Color(0xFF111111)],
+          ),
+        ),
+        child: SafeArea(
+          child: Center(
+            child: AnimatedBuilder(
+              animation: _controller,
+              builder: (context, child) {
+                return Opacity(opacity: _fade.value, child: child);
+              },
+              child: Image.asset(
+                'assets/branding/splash_logo.png',
+                key: const Key('app-splash-logo'),
+                width: 216,
+                height: 216,
+                fit: BoxFit.contain,
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
 }
 
-class _StartupShell extends StatelessWidget {
-  const _StartupShell();
+class _AppStartupError extends StatelessWidget {
+  const _AppStartupError({required this.onRetry});
+
+  final VoidCallback onRetry;
 
   @override
   Widget build(BuildContext context) {
-    return const ColoredBox(
-      color: _appBackgroundColor,
-      child: SafeArea(
-        child: Center(
-          child: Padding(
-            padding: EdgeInsets.all(24),
+    return Scaffold(
+      key: const Key('app-startup-error'),
+      backgroundColor: const Color(0xFF15120D),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(28),
+          child: Center(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  'Money',
-                  textAlign: TextAlign.center,
+                const Text(
+                  '应用启动失败',
                   style: TextStyle(
-                    color: Color(0xFF24190F),
-                    fontSize: 28,
+                    color: Color(0xFFF8F2E6),
+                    fontSize: 22,
                     fontWeight: FontWeight.w800,
-                    letterSpacing: -1.2,
                   ),
                 ),
-                SizedBox(height: 10),
-                Text(
-                  '正在打开本机资产数据...',
+                const SizedBox(height: 12),
+                const Text(
+                  '本机数据读取失败，请重试',
                   textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: Color(0xFF7B6247),
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                  ),
+                  style: TextStyle(color: Color(0xFFC8B98F), height: 1.4),
                 ),
+                const SizedBox(height: 24),
+                FilledButton(onPressed: onRetry, child: const Text('重试')),
               ],
             ),
           ),
